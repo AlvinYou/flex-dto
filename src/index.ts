@@ -57,6 +57,7 @@
 
 const aliasMetadata = new WeakMap<object, Record<string, string[]>>();
 const transformMetadata = new WeakMap<object, Record<string, TransformFn>>();
+const enumMetadata = new WeakMap<object, Record<string, object>>();
 
 function getAliases(target: object): Record<string, string[]> {
   return aliasMetadata.get(target.constructor.prototype) || {};
@@ -64,6 +65,10 @@ function getAliases(target: object): Record<string, string[]> {
 
 function getTransforms(target: object): Record<string, TransformFn> {
   return transformMetadata.get(target.constructor.prototype) || {};
+}
+
+function getEnums(target: object): Record<string, object> {
+  return enumMetadata.get(target.constructor.prototype) || {};
 }
 
 // ============================================================================
@@ -100,6 +105,30 @@ export function Transform(fn: TransformFn) {
     const existing = transformMetadata.get(proto) || {};
     existing[propertyKey] = fn;
     transformMetadata.set(proto, existing);
+  };
+}
+
+/**
+ * Define enum for field value validation
+ * @example
+ * enum UserRole { ADMIN = "admin", USER = "user" }
+ *
+ * @Enum(UserRole)
+ * role: UserRole = UserRole.USER;
+ */
+export function Enum(enumObj: object) {
+  // Return type that works with both legacy and modern decorators
+  return function <T, V>(
+    _target: undefined | ((this: T, value: V) => V),
+    context: ClassFieldDecoratorContext<T, V>
+  ): void {
+    const fieldName = String(context.name);
+    context.addInitializer(function (this: T) {
+      const proto = Object.getPrototypeOf(this as object);
+      const existing = enumMetadata.get(proto) || {};
+      existing[fieldName] = enumObj;
+      enumMetadata.set(proto, existing);
+    });
   };
 }
 
@@ -217,6 +246,30 @@ function isDevelopmentMode(): boolean {
   return false;
 }
 
+/**
+ * Enum configuration for validation
+ * Maps field names to their enum objects for runtime validation
+ *
+ * @example
+ * ```typescript
+ * enum UserRole { ADMIN = "admin", USER = "user" }
+ *
+ * class User extends FlexDto {
+ *   role: UserRole = UserRole.USER;
+ *
+ *   constructor(data: User) {
+ *     super();
+ *     this.init(data, {
+ *       enums: { role: UserRole }
+ *     });
+ *   }
+ * }
+ * ```
+ */
+export type Enums<T> = {
+  [K in keyof T]?: object;
+};
+
 export interface FlexDtoOptions<T> {
   /** Custom aliases for field mapping */
   aliases?: Record<string, string[]>;
@@ -242,6 +295,20 @@ export interface FlexDtoOptions<T> {
    */
   transforms?: Transforms<T>;
   /**
+   * Enum objects for runtime validation
+   * Validates that values are valid enum members
+   *
+   * @example
+   * ```typescript
+   * enum Status { ACTIVE = 1, INACTIVE = 0 }
+   *
+   * this.init(data, {
+   *   enums: { status: Status }
+   * });
+   * ```
+   */
+  enums?: Enums<T>;
+  /**
    * Strict mode: warn about type mismatches in development
    * - true: Warn in development when types don't match (never throws errors)
    * - false: Never warn
@@ -264,6 +331,7 @@ export interface FlexDtoOptions<T> {
 interface InternalOptions {
   aliases?: Record<string, string[]>;
   transforms?: Record<string, TransformFn>;
+  enums?: Record<string, object>;
   strictMode?: boolean;
 }
 
@@ -450,8 +518,21 @@ export class FlexDto {
 
     const decoratorAliases = getAliases(this);
     const decoratorTransforms = getTransforms(this);
+    const decoratorEnums = getEnums(this);
     const aliases = { ...decoratorAliases, ...this._opts.aliases };
-    const transforms = { ...decoratorTransforms, ...this._opts.transforms };
+    const rawTransforms = { ...decoratorTransforms, ...this._opts.transforms };
+    const enums = { ...decoratorEnums, ...this._opts.enums };
+
+    // Separate enum objects from transform functions
+    const transforms: Record<string, TransformFn> = {};
+    for (const [key, value] of Object.entries(rawTransforms)) {
+      if (typeof value === "function") {
+        transforms[key] = value;
+      } else if (typeof value === "object" && value !== null) {
+        // It's an enum object, add to enums
+        enums[key] = value;
+      }
+    }
 
     // Get all class field names
     const classFields = this.getClassFields();
@@ -524,6 +605,25 @@ export class FlexDto {
         } else if (expectedType && strictMode) {
           // Validate type if no transform
           this.validateType(targetKey, value, expectedType);
+        }
+
+        // Validate enum if specified
+        const enumObj = enums[targetKey];
+        if (enumObj && strictMode) {
+          // Get enum values (filter out reverse mappings for numeric enums)
+          const enumValues = Object.entries(enumObj)
+            .filter(([key]) => isNaN(Number(key)))
+            .map(([, value]) => value);
+          if (!enumValues.includes(finalValue)) {
+            const className = this.constructor.name;
+            const isDev = isDevelopmentMode();
+            if (isDev) {
+              console.warn(
+                `[flex-dto] Invalid enum value in ${className}.${targetKey}: ` +
+                  `Got ${JSON.stringify(finalValue)}, expected one of [${enumValues.map(v => JSON.stringify(v)).join(", ")}].`
+              );
+            }
+          }
         }
 
         // Assign to class field using property access

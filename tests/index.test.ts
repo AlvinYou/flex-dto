@@ -1,4 +1,4 @@
-import { FlexDto } from "../src/index";
+import { Enum, FlexDto } from "../src/index";
 
 // ============================================================================
 // 테스트 헬퍼 함수
@@ -1056,6 +1056,128 @@ try {
       nodeProcessEnum.env.NODE_ENV = originalEnvEnum;
     }
     console.warn = originalWarn10;
+  }
+
+  // ========================================================================
+  // Enum 검증 테스트 (3가지 방법)
+  // ========================================================================
+  console.log("");
+  console.log("📋 Enum 검증 테스트 (3가지 방법)");
+
+  enum ValidateRole {
+    ADMIN = "admin",
+    USER = "user",
+    GUEST = "guest",
+  }
+
+  enum ValidateStatus {
+    ACTIVE = 1,
+    INACTIVE = 0,
+  }
+
+  // 방법 1: transforms에 enum 객체 직접 전달
+  class EnumTransformDto extends FlexDto {
+    role: ValidateRole = ValidateRole.USER;
+    status: ValidateStatus = ValidateStatus.ACTIVE;
+
+    constructor(data: EnumTransformDto) {
+      super();
+      this.init(data, {
+        transforms: {
+          role: ValidateRole,
+          status: ValidateStatus,
+        } as any,
+      });
+    }
+  }
+
+  // 방법 2: @Enum 데코레이터
+  class EnumDecoratorDto extends FlexDto {
+    @Enum(ValidateRole)
+    role: ValidateRole = ValidateRole.USER;
+
+    @Enum(ValidateStatus)
+    status: ValidateStatus = ValidateStatus.ACTIVE;
+
+    constructor(data: EnumDecoratorDto) {
+      super();
+      this.init(data);
+    }
+  }
+
+  // 방법 3: enums 옵션
+  class EnumOptionDto extends FlexDto {
+    role: ValidateRole = ValidateRole.USER;
+    status: ValidateStatus = ValidateStatus.ACTIVE;
+
+    constructor(data: EnumOptionDto) {
+      super();
+      this.init(data, {
+        enums: { role: ValidateRole, status: ValidateStatus },
+      });
+    }
+  }
+
+  // 올바른 값 테스트
+  const validTransform = new EnumTransformDto({ role: "admin", status: 1 } as any);
+  assertEqual(validTransform.role, "admin", "Enum transforms - 올바른 값");
+  assertEqual(validTransform.status, 1, "Enum transforms - 올바른 number 값");
+
+  const validDecorator = new EnumDecoratorDto({ role: "user", status: 0 } as any);
+  assertEqual(validDecorator.role, "user", "Enum @Enum - 올바른 값");
+  assertEqual(validDecorator.status, 0, "Enum @Enum - 올바른 number 값");
+
+  const validOption = new EnumOptionDto({ role: "guest", status: 1 } as any);
+  assertEqual(validOption.role, "guest", "Enum enums옵션 - 올바른 값");
+  assertEqual(validOption.status, 1, "Enum enums옵션 - 올바른 number 값");
+
+  // 잘못된 값 테스트 - 워닝 확인
+  const originalWarn11 = console.warn;
+  let warnMessages11: string[] = [];
+  console.warn = (...args: unknown[]) => {
+    warnMessages11.push(String(args[0]));
+  };
+
+  if (nodeProcessEnum?.env) {
+    nodeProcessEnum.env.NODE_ENV = "development";
+  }
+
+  try {
+    warnMessages11 = [];
+    new EnumTransformDto({ role: "invalid_role", status: 999 } as any);
+    assert(
+      warnMessages11.some((m) => m.includes("Invalid enum value")),
+      "Enum transforms - 잘못된 값 워닝"
+    );
+    assert(
+      warnMessages11.some((m) => m.includes("role")),
+      "Enum transforms - role 필드 워닝"
+    );
+    assert(
+      warnMessages11.some((m) => m.includes("status")),
+      "Enum transforms - status 필드 워닝"
+    );
+
+    warnMessages11 = [];
+    new EnumDecoratorDto({ role: "invalid_role", status: 999 } as any);
+    assert(
+      warnMessages11.some((m) => m.includes("Invalid enum value")),
+      "Enum @Enum - 잘못된 값 워닝"
+    );
+
+    warnMessages11 = [];
+    new EnumOptionDto({ role: "invalid_role", status: 999 } as any);
+    assert(
+      warnMessages11.some((m) => m.includes("Invalid enum value")),
+      "Enum enums옵션 - 잘못된 값 워닝"
+    );
+
+    console.log("   ✅ 모든 Enum 검증 방법이 정상적으로 작동합니다!");
+  } finally {
+    if (nodeProcessEnum?.env) {
+      nodeProcessEnum.env.NODE_ENV = originalEnvEnum;
+    }
+    console.warn = originalWarn11;
   }
 
   // 배열 테스트
