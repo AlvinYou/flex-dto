@@ -1,6 +1,6 @@
 {
   "name": "flex-dto",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Flexible DTO mapper for frontend - snake_case/camelCase conversion with class instantiation",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
